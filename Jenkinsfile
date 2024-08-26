@@ -1,40 +1,54 @@
 pipeline {
+    
     agent any
+    
     environment {
-        DOCKER_CREDENTIAL_ID = 'NEXUS_CRED' // Thay bằng ID credentials trong Jenkins để kết nối với Nexus
-        NEXUS_URL = 'http://192.168.127.100:8081/' // Thay bằng URL của Nexus
-        NEXUS_REPOSITORY = 'wordpress' // Thay bằng tên repository Docker trên Nexus
+        imageName = "mywordpress"
+        registryCredentials = "NEXUS_CRED"
+        registry = "192.168.127.100:5000"
+        dockerImage = ''
     }
+    
     stages {
-        stage('Clone Repository') {
+        stage('Code checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/Phuc03hp/wordpress_image.git' // Thay bằng URL repository của bạn
-            }
+                checkout([$class: 'GitSCM', branches: [[name: '*/main']], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: '', url: 'https://github.com/Phuc03hp/wordpress_image.git']]])                   }
         }
-        stage('Build and Tag Docker Image') {
-            steps {
-                script {
-                    dockerImage = "wordpress_phuc:${env.BUILD_NUMBER}"
-                    sh "docker build -t ${dockerImage} ." // Build Docker image sử dụng Dockerfile
-                }
-            }
+    
+    // Building Docker images
+    stage('Building image') {
+      steps{
+        script {
+          dockerImage = docker.build -t imageName .
         }
-        stage('Push Docker Image to Nexus') {
-            steps {
-                script {
-                    docker.withRegistry("${NEXUS_URL}/repository/${NEXUS_REPOSITORY}", "${DOCKER_CREDENTIAL_ID}") {
-                        sh "docker push ${dockerImage}"
-                    }
-                }
-            }
+      }
+    }
+
+    // Uploading Docker images into Nexus Registry
+    stage('Uploading to Nexus') {
+     steps{  
+         script {
+             docker.withRegistry( 'http://'+registry, registryCredentials ) {
+             dockerImage.push('latest')
+          }
         }
-        stage('Clean Up') {
-            steps {
-                script {
-                    sh "docker rmi ${dockerImage}"
-                }
+      }
+    }
+    
+    // Stopping Docker containers for cleaner Docker run
+    stage('stop previous containers') {
+         steps {
+            sh 'docker ps -f name=mywordpress -q | xargs --no-run-if-empty docker container stop'
+            sh 'docker container ls -a -fname=mywordpress -q | xargs -r docker container rm'
+         }
+       }
+      
+    stage('Docker Run') {
+       steps{
+         script {
+                sh 'docker run -d -p 8888:80 --rm --name mywordpress ' + registry + imageName
             }
-        }
+         }
+      }    
     }
 }
-
